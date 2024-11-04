@@ -15,6 +15,11 @@ app.get('/', async (req, res) => {
     });
 });
 
+// Google S2 Favicon API URL
+function getFaviconFromGoogle(domain) {
+    return `https://www.google.com/s2/favicons?sz=64&domain_url=${domain}`;
+}
+
 // 通用路由，通过查询参数传递 URL 获取 favicon
 app.get('/favicon', async (req, res) => {
     try {
@@ -49,15 +54,34 @@ app.get('/favicon/:domain', async (req, res) => {
             return res.send(cachedData.data);
         }
 
-        const targetUrl = `https://${domain}`;
-
         // 设定超时时间以避免函数过长
         const axiosConfig = {
-            responseType: 'arraybuffer',
-            // timeout: 10000 // 设置超时为 10 秒
+            responseType: 'arraybuffer'
         };
 
-        // 1. 尝试直接访问 /favicon.ico
+        // 1. 优先使用 Google S2 Favicon API
+        try {
+            const googleFaviconUrl = getFaviconFromGoogle(domain);
+            const googleResponse = await axios.get(googleFaviconUrl, axiosConfig);
+
+            if (googleResponse.status === 200) {
+                const contentType = googleResponse.headers['content-type'];
+
+                // 将结果缓存
+                faviconCache.set(domain, {
+                    data: googleResponse.data,
+                    contentType: contentType || 'image/x-icon'
+                });
+
+                res.setHeader('Content-Type', contentType || 'image/x-icon');
+                return res.send(googleResponse.data);
+            }
+        } catch (error) {
+            console.warn(`Google S2 API failed for domain: ${domain}, trying direct favicon fetching.`);
+        }
+
+        // 2. 如果 Google S2 API 失败，尝试直接访问 /favicon.ico
+        const targetUrl = `https://${domain}`;
         try {
             const faviconUrl = `${targetUrl}/favicon.ico`;
             const response = await axios.get(faviconUrl, axiosConfig);
@@ -78,7 +102,7 @@ app.get('/favicon/:domain', async (req, res) => {
             console.warn(`Direct favicon.ico request failed for domain: ${domain}, trying HTML parsing.`);
         }
 
-        // 2. 获取页面 HTML 并解析 link 标签中的 favicon
+        // 3. 获取页面 HTML 并解析 link 标签中的 favicon
         try {
             const pageResponse = await axios.get(targetUrl, { timeout: 5000 }); // HTML 获取超时为 5 秒
             const $ = cheerio.load(pageResponse.data);

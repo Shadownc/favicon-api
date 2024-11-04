@@ -18,40 +18,13 @@ async function fetchWithTimeout(url, options = {}, timeout = 5000) {
     return response;
   } catch (error) {
     clearTimeout(timeoutId);
+    console.error(`Fetch error for ${url}:`, error);
     throw error;
   }
 }
 
-// 针对特定网站的处理规则
-const specialDomains = {
-  'blog.csdn.net': {
-    directUrl: 'https://g.csdnimg.cn/static/logo/favicon32.ico',
-    timeout: 3000
-  },
-  // 可以添加其他特殊网站的规则
-};
-
 // 尝试获取图标的所有可能路径
 async function tryGetFavicon(domain) {
-  // 检查是否是特殊域名
-  const specialDomain = specialDomains[domain];
-  if (specialDomain) {
-    try {
-      const response = await fetchWithTimeout(
-        specialDomain.directUrl, 
-        {}, 
-        specialDomain.timeout
-      );
-      if (response.ok) {
-        const contentType = response.headers.get('content-type');
-        const data = await response.arrayBuffer();
-        return { success: true, data, contentType };
-      }
-    } catch (error) {
-      console.warn(`Special domain fetch failed for ${domain}:`, error);
-    }
-  }
-
   const targetUrl = `https://${domain}`;
   const commonPaths = [
     '/favicon.ico',
@@ -61,58 +34,30 @@ async function tryGetFavicon(domain) {
     '/public/favicon.ico'
   ];
 
-  // 并发请求所有可能的 favicon 路径
-  const promises = commonPaths.map(path => 
-    fetchWithTimeout(`${targetUrl}${path}`, {}, 3000)
-      .then(async response => {
-        if (response.ok) {
-          const contentType = response.headers.get('content-type');
-          const data = await response.arrayBuffer();
-          return { success: true, data, contentType };
-        }
-        return { success: false };
-      })
-      .catch(() => ({ success: false }))
-  );
-
-  // 等待第一个成功的结果或全部失败
-  const results = await Promise.race([
-    Promise.all(promises),
-    new Promise(resolve => setTimeout(() => resolve([]), 4000))
-  ]);
-  
-  const successResult = results.find(result => result.success);
-  if (successResult) {
-    return successResult;
-  }
-  return null;
-}
-
-// 从 HTML 中快速提取 favicon URL
-function extractFaviconUrl(html, baseUrl) {
-  const patterns = [
-    /<link[^>]*rel=["'](?:icon|shortcut icon)["'][^>]*href=["']([^"']+)["']/i,
-    /<link[^>]*href=["']([^"']+)["'][^>]*rel=["'](?:icon|shortcut icon)["']/i,
-    /<link[^>]*rel=["']apple-touch-icon["'][^>]*href=["']([^"']+)["']/i
-  ];
-
-  for (const pattern of patterns) {
-    const match = html.match(pattern);
-    if (match && match[1]) {
-      try {
-        return new URL(match[1], baseUrl).href;
-      } catch (e) {
-        continue;
+  for (const path of commonPaths) {
+    try {
+      const response = await fetchWithTimeout(`${targetUrl}${path}`, {}, 3000);
+      if (response.ok) {
+        const contentType = response.headers.get('content-type');
+        const data = await response.arrayBuffer();
+        return { success: true, data, contentType };
       }
+    } catch (error) {
+      console.warn(`Failed to fetch favicon from ${path}:`, error);
     }
   }
   return null;
 }
 
+// 使用Google S2 Favicon API作为优先方案
+function getFaviconFromGoogle(domain) {
+  return `https://www.google.com/s2/favicons?sz=64&domain_url=${domain}`;
+}
+
 async function handleRequest(request) {
   const url = new URL(request.url);
   const path = url.pathname;
-  
+
   // 根路径，返回 API 状态
   if (path === '/') {
     return new Response(JSON.stringify({ status: "API is running" }), {
@@ -152,9 +97,30 @@ async function handleRequest(request) {
         });
       }
       
-      // 1. 首先尝试常见的 favicon 路径
+      // 1. 优先使用 Google S2 Favicon API
+      const googleFaviconUrl = getFaviconFromGoogle(domain);
+      const googleFaviconResponse = await fetchWithTimeout(googleFaviconUrl, {}, 3000);
+      if (googleFaviconResponse.ok) {
+        const contentType = googleFaviconResponse.headers.get('content-type');
+        const data = await googleFaviconResponse.arrayBuffer();
+        
+        faviconCache.set(domain, {
+          data,
+          contentType: contentType || 'image/x-icon'
+        });
+        
+        return new Response(data, {
+          headers: { 
+            'Content-Type': contentType || 'image/x-icon',
+            'Cache-Control': 'public, max-age=86400',
+            'Access-Control-Allow-Origin': '*'
+          }
+        });
+      }
+
+      // 2. 如果Google S2 Favicon API失败，尝试常见的 favicon 路径
       const directResult = await tryGetFavicon(domain);
-      if (directResult) {
+      if (directResult && directResult.success) {
         faviconCache.set(domain, directResult);
         return new Response(directResult.data, {
           headers: { 
@@ -165,42 +131,7 @@ async function handleRequest(request) {
         });
       }
 
-      // 如果是特殊域名但没有获取到图标，直接返回 404
-      if (specialDomains[domain]) {
-        return new Response('Favicon not found', { status: 404 });
-      }
-      
-      // 2. 如果直接路径都失败，尝试解析 HTML
-      try {
-        const targetUrl = `https://${domain}`;
-        const pageResponse = await fetchWithTimeout(targetUrl, {}, 4000);
-        const html = await pageResponse.text();
-        const faviconUrl = extractFaviconUrl(html, targetUrl);
-        
-        if (faviconUrl) {
-          const faviconResponse = await fetchWithTimeout(faviconUrl, {}, 3000);
-          if (faviconResponse.ok) {
-            const contentType = faviconResponse.headers.get('content-type');
-            const data = await faviconResponse.arrayBuffer();
-            
-            faviconCache.set(domain, {
-              data,
-              contentType: contentType || 'image/x-icon'
-            });
-            
-            return new Response(data, {
-              headers: { 
-                'Content-Type': contentType || 'image/x-icon',
-                'Cache-Control': 'public, max-age=86400',
-                'Access-Control-Allow-Origin': '*'
-              }
-            });
-          }
-        }
-      } catch (error) {
-        console.warn('HTML parsing error:', error);
-      }
-      
+      // 3. 返回 404 如果没有找到
       return new Response('Favicon not found', { status: 404 });
       
     } catch (error) {
