@@ -10,6 +10,10 @@
       {
         "src": "/favicon/(.*)",
         "dest": "index.js"
+      },
+      {
+        "src": "/(.*)",
+        "dest": "index.js"
       }
     ]
   }
