@@ -1,0 +1,7 @@
+name = "favicon-api"
+type = "javascript"
+
+main = "worker.js"
+
+workers_dev = true
+compatibility_date = "2024-11-04"
