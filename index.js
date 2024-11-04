@@ -12,14 +12,34 @@ app.get('/', async (req, res) => {
     });
 });
 
-// 处理带有域名的 favicon 路由，例如 /favicon/example.com
+// 通用路由，通过查询参数传递 URL 获取 favicon
+app.get('/favicon', async (req, res) => {
+    try {
+        const targetUrl = req.query.url;
+
+        if (!targetUrl) {
+            return res.status(400).send('URL parameter is required');
+        }
+
+        // 从目标 URL 中提取域名
+        const domain = new URL(targetUrl).hostname;
+
+        // 重定向到 /favicon/:domain.png
+        res.redirect(307, `/favicon/${domain}.png`);
+    } catch (error) {
+        console.error('Error:', error);
+        res.status(500).send('Error processing request');
+    }
+});
+
+// 处理带有域名的 favicon 路由，例如 /favicon/example.com.png
 app.get('/favicon/:domain', async (req, res) => {
     try {
-        // 获取请求的域名
+        // 从请求参数中获取域名
         const domain = req.params.domain.replace('.png', '');
         const targetUrl = `https://${domain}`;
 
-        // 1. 尝试直接访问 /favicon.ico
+        // 1. 首先尝试直接访问 /favicon.ico
         try {
             const faviconUrl = `${targetUrl}/favicon.ico`;
             const response = await axios.get(faviconUrl, { responseType: 'arraybuffer' });
