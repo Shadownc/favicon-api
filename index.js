@@ -1,56 +1,20 @@
 const express = require('express');
 const axios = require('axios');
 const cheerio = require('cheerio');
-const path = require('path');
-const fs = require('fs').promises;
-
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// favicon 存储目录（可选）
-// const FAVICON_DIR = path.join(__dirname, 'public', 'favicon');
-
-// 确保 favicon 目录存在
-// async function ensureDirectory() {
-//     try {
-//         await fs.mkdir(FAVICON_DIR, { recursive: true });
-//     } catch (error) {
-//         console.error('Error creating directory:', error);
-//     }
-// }
-
-// ensureDirectory();
-
+// 根路径，检查 API 状态
 app.get('/', async (req, res) => {
     res.json({
         status: "API is running"
     });
 });
 
-// 获取 favicon 的路由
-app.get('/favicon', async (req, res) => {
-    try {
-        const targetUrl = req.query.url;
-
-        if (!targetUrl) {
-            return res.status(400).send('URL parameter is required');
-        }
-
-        // 从 URL 中提取域名
-        const domain = new URL(targetUrl).hostname;
-        const faviconPath = `/favicon/${domain}.png`;
-
-        // 重定向到新的 URL
-        res.redirect(307, faviconPath);
-    } catch (error) {
-        console.error('Error:', error);
-        res.status(500).send('Error processing request');
-    }
-});
-
 // 处理带有域名的 favicon 路由
 app.get('/favicon/:domain', async (req, res) => {
     try {
+        // 从请求参数中获取域名
         const domain = req.params.domain.replace('.png', '');
         const targetUrl = `https://${domain}`;
 
@@ -64,7 +28,7 @@ app.get('/favicon/:domain', async (req, res) => {
                 return res.send(response.data);
             }
         } catch (error) {
-            // 如果直接访问 favicon.ico 失败，继续尝试其他方法
+            // 如果直接访问/favicon.ico失败，继续尝试其他方法
         }
 
         // 2. 获取页面 HTML 并解析 link 标签中的 favicon
@@ -82,19 +46,40 @@ app.get('/favicon/:domain', async (req, res) => {
 
         // 处理相对路径
         const absoluteFaviconUrl = new URL(faviconLink, targetUrl).href;
-        
+
         // 获取 favicon
         const faviconResponse = await axios.get(absoluteFaviconUrl, { responseType: 'arraybuffer' });
-        
+
         // 设置正确的 Content-Type
         const contentType = faviconResponse.headers['content-type'];
         res.setHeader('Content-Type', contentType || 'image/x-icon');
-        
+
         // 返回 favicon 图像数据
         res.send(faviconResponse.data);
     } catch (error) {
         console.error('Error:', error);
         res.status(500).send('Error fetching favicon');
+    }
+});
+
+// 获取 favicon 的通用路由，通过 query 参数传递 URL
+app.get('/favicon', async (req, res) => {
+    try {
+        const targetUrl = req.query.url;
+
+        if (!targetUrl) {
+            return res.status(400).send('URL parameter is required');
+        }
+
+        // 直接使用 /favicon/:domain 的逻辑
+        const domain = new URL(targetUrl).hostname;
+        const redirectPath = `/favicon/${domain}.png`;
+
+        // 重定向到 /favicon/:domain.png
+        res.redirect(307, redirectPath);
+    } catch (error) {
+        console.error('Error:', error);
+        res.status(500).send('Error processing request');
     }
 });
 
