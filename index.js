@@ -21,6 +21,12 @@ const PORT = process.env.PORT || 3000;
 
 // ensureDirectory();
 
+app.get('/', async (req, res) => {
+    res.json({
+        status: "API is running"
+    });
+});
+
 // 获取 favicon 的路由
 app.get('/favicon', async (req, res) => {
     try {
